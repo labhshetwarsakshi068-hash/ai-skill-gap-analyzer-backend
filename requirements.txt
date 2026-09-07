@@ -1,0 +1,8 @@
+Flask
+flask-cors
+mysql-connector-python
+pypdf
+python-docx
+python-dotenv
+google-genai
+PyJWT
