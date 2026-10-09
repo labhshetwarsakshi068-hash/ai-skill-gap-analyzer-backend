@@ -2,81 +2,94 @@ import os
 from dotenv import load_dotenv
 from google import genai
 
-# Load environment variables
 load_dotenv()
 
-# Get Gemini API key
 API_KEY = os.getenv("GEMINI_API_KEY")
-
-if not API_KEY:
-    raise ValueError("GEMINI_API_KEY is not set in .env file")
-
-# Create Gemini client
-client = genai.Client(api_key=API_KEY)
+client = genai.Client(api_key=API_KEY) if API_KEY else None
 
 
 def generate_recommendation(target_role, matched_skills, missing_skills):
-    """
-    Generate personalized career recommendations using Gemini AI.
-    """
-
     matched_text = ", ".join(matched_skills) if matched_skills else "None"
     missing_text = ", ".join(missing_skills) if missing_skills else "None"
 
     prompt = f"""
 You are an AI Career Recommendation Assistant.
 
-Target Job Role:
-{target_role}
+Target Role: {target_role}
+Existing Skills: {matched_text}
+Missing Skills: {missing_text}
 
-Student's Existing Skills:
-{matched_text}
-
-Student's Missing Skills:
-{missing_text}
-
-Create a personalized learning recommendation for this student.
-
-Provide the response in the following format:
-
+Write a personalized recommendation using these separate headings:
 1. Skill Priority
-- List the missing skills in learning priority order.
-
 2. Learning Roadmap
-- Give a step-by-step roadmap from beginner to advanced.
-- Mention what the student should learn first, second, third, etc.
-
 3. Learning Topics
-- Mention important topics for each missing skill.
-
 4. Project Recommendations
-- Suggest practical projects that the student can build.
-
 5. Career Advice
-- Give short advice on how the student can prepare for the target role.
 
-Keep the response practical, clear and suitable for a college student.
+Use clear numbered lists under each heading.
+Keep the response practical and suitable for a college student.
 """
 
-    interaction = client.interactions.create(
-        model="gemini-3.6-flash",
-        input=prompt
-    )
+    if client:
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.5-flash",
+                contents=prompt
+            )
+            if response.text:
+                return response.text.strip()
+        except Exception as error:
+            print(f"Gemini API unavailable: {error}")
 
-    return interaction.output_text
+    # Fallback recommendation when Gemini is unavailable
+    if missing_skills:
+        priority_items = "\n".join(
+            f"{i}. {skill}" for i, skill in enumerate(missing_skills, 1)
+        )
+        roadmap_items = "\n".join(
+            f"{i}. Learn {skill}: study the basics, practise with examples, "
+            f"and build a small project."
+            for i, skill in enumerate(missing_skills, 1)
+        )
+        topic_items = "\n".join(
+            f"- {skill}: fundamentals, practical exercises, and real-world use."
+            for skill in missing_skills
+        )
+    else:
+        priority_items = "No missing skills identified."
+        roadmap_items = "Practise advanced concepts and build portfolio projects."
+        topic_items = "Explore advanced topics related to your target role."
+
+    return f"""## 🎯 Personalized Career Recommendation
+
+**Target Role:** {target_role}
+
+### 1. 🎯 Skill Priority
+{priority_items}
+
+### 2. 🗺️ Learning Roadmap
+{roadmap_items}
+
+### 3. 📚 Learning Topics
+{topic_items}
+
+### 4. 💻 Project Recommendations
+1. Build a project related to {target_role} using your existing skills.
+2. Gradually integrate the missing skills into the project.
+3. Upload your project and documentation to GitHub.
+
+### 5. 🚀 Career Advice
+1. Practise coding and problem-solving regularly.
+2. Build practical projects and maintain a GitHub portfolio.
+3. Prepare for technical interviews related to {target_role}.
+
+*Note: This is a fallback recommendation, not a Gemini-generated response.*
+"""
 
 
 if __name__ == "__main__":
-
     target_role = "AI/ML Engineer"
-
-    matched_skills = [
-        "Python",
-        "Machine Learning",
-        "Git",
-        "Docker"
-    ]
-
+    matched_skills = ["Python", "Machine Learning", "Git", "Docker"]
     missing_skills = [
         "Deep Learning",
         "Pandas",
@@ -86,11 +99,8 @@ if __name__ == "__main__":
         "PyTorch"
     ]
 
-    recommendation = generate_recommendation(
+    print(generate_recommendation(
         target_role,
         matched_skills,
         missing_skills
-    )
-
-    print("\n===== AI PERSONALIZED RECOMMENDATION =====\n")
-    print(recommendation)
+    ))
