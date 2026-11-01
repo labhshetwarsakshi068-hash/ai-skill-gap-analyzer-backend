@@ -1854,7 +1854,212 @@ def get_learning_resource(skill_id):
         if connection:
             connection.close()
 
+# =========================================================
+# PROGRESS TRACKING API - GET USER PROGRESS
+# =========================================================
 
+@app.route("/api/progress", methods=["GET"])
+@token_required
+def get_progress(current_user_id):
+
+    connection = None
+    cursor = None
+
+    try:
+
+        user_id = request.args.get("user_id", type=int)
+        role_id = request.args.get("role_id", type=int)
+
+        if not user_id or not role_id:
+            return {
+                "success": False,
+                "message": "user_id and role_id are required"
+            }, 400
+
+        if current_user_id != user_id:
+            return {
+                "success": False,
+                "message": "You are not authorized to access this progress"
+            }, 403
+
+        connection = get_db_connection()
+        cursor = connection.cursor(dictionary=True)
+
+        cursor.execute(
+            """
+            SELECT
+                s.id AS skill_id,
+                s.skill_name,
+                COALESCE(pt.is_completed, 0) AS is_completed,
+                pt.completed_at
+            FROM role_skills rs
+            JOIN skills s
+                ON rs.skill_id = s.id
+            LEFT JOIN progress_tracking pt
+                ON pt.skill_id = s.id
+                AND pt.user_id = %s
+                AND pt.role_id = %s
+            WHERE rs.role_id = %s
+            ORDER BY s.id
+            """,
+            (user_id, role_id, role_id)
+        )
+
+        skills = cursor.fetchall()
+
+        total_skills = len(skills)
+
+        completed_skills = sum(
+            1 for skill in skills
+            if skill["is_completed"]
+        )
+
+        pending_skills = total_skills - completed_skills
+
+        progress_percentage = (
+            round((completed_skills / total_skills) * 100, 2)
+            if total_skills else 0
+        )
+
+        return {
+            "success": True,
+            "user_id": user_id,
+            "role_id": role_id,
+            "total_skills": total_skills,
+            "completed_skills": completed_skills,
+            "pending_skills": pending_skills,
+            "progress_percentage": progress_percentage,
+            "skills": skills
+        }, 200
+
+    except Exception as e:
+
+        return {
+            "success": False,
+            "message": str(e)
+        }, 500
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        if connection:
+            connection.close()
+
+
+# =========================================================
+# PROGRESS TRACKING API - UPDATE SKILL STATUS
+# =========================================================
+
+@app.route("/api/progress", methods=["POST"])
+@token_required
+def update_progress(current_user_id):
+
+    connection = None
+    cursor = None
+
+    try:
+
+        data = request.get_json()
+
+        if not data:
+            return {
+                "success": False,
+                "message": "Request body is required"
+            }, 400
+
+        user_id = data.get("user_id")
+        role_id = data.get("role_id")
+        skill_id = data.get("skill_id")
+        is_completed = data.get("is_completed")
+
+        if (
+            not user_id
+            or not role_id
+            or not skill_id
+            or not isinstance(is_completed, bool)
+        ):
+            return {
+                "success": False,
+                "message": "Valid user_id, role_id, skill_id and is_completed are required"
+            }, 400
+
+        if current_user_id != user_id:
+            return {
+                "success": False,
+                "message": "You are not authorized to update this progress"
+            }, 403
+
+        connection = get_db_connection()
+        cursor = connection.cursor()
+
+        # Check whether skill belongs to the selected role
+
+        cursor.execute(
+            """
+            SELECT skill_id
+            FROM role_skills
+            WHERE role_id = %s AND skill_id = %s
+            """,
+            (role_id, skill_id)
+        )
+
+        if not cursor.fetchone():
+            return {
+                "success": False,
+                "message": "Skill does not belong to this job role"
+            }, 404
+
+        cursor.execute(
+            """
+            INSERT INTO progress_tracking
+                (user_id, role_id, skill_id, is_completed, completed_at)
+            VALUES (%s, %s, %s, %s,
+                CASE WHEN %s = 1 THEN CURRENT_TIMESTAMP ELSE NULL END)
+            ON DUPLICATE KEY UPDATE
+                is_completed = VALUES(is_completed),
+                completed_at = CASE
+                    WHEN VALUES(is_completed) = 1
+                    THEN CURRENT_TIMESTAMP
+                    ELSE NULL
+                END
+            """,
+            (
+                user_id,
+                role_id,
+                skill_id,
+                is_completed,
+                is_completed
+            )
+        )
+
+        connection.commit()
+
+        return {
+            "success": True,
+            "message": "Progress updated successfully",
+            "skill_id": skill_id,
+            "is_completed": is_completed
+        }, 200
+
+    except Exception as e:
+
+        if connection:
+            connection.rollback()
+
+        return {
+            "success": False,
+            "message": str(e)
+        }, 500
+
+    finally:
+
+        if cursor:
+            cursor.close()
+
+        if connection:
+            connection.close()
 # =========================================================
 # AI RECOMMENDATION API
 # =========================================================
